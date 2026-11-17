@@ -1,0 +1,15 @@
+{
+  "name": "marketing-hub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Marketing Hub (Project 12): Audience, email sending layer, Newsletter, Analytics and the Event Hub slot. Built from the Marketing Hub PRD.",
+  "scripts": {
+    "install:all": "npm install --prefix server && npm install --prefix client",
+    "seed": "npm run seed --prefix server",
+    "dev:server": "npm run dev --prefix server",
+    "dev:client": "npm run dev --prefix client",
+    "build": "npm run build --prefix client",
+    "start": "npm start --prefix server",
+    "test": "npm test --prefix server"
+  }
+}
