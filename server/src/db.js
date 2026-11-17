@@ -6,10 +6,19 @@ export let db;
 
 export function openDb(file = config.dbFile) {
   db = new DatabaseSync(file);
-  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+  // Serverless keeps the database as one file (no WAL) so it can be snapshotted to Netlify Blobs.
+  // There the local file is only a cache: durability comes from the snapshot saved after each request,
+  // so disk syncs are skipped.
+  const serverless = process.env.MH_SERVERLESS === '1';
+  db.exec(serverless
+    ? 'PRAGMA journal_mode = MEMORY; PRAGMA synchronous = OFF; PRAGMA foreign_keys = ON;'
+    : 'PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   migrate();
   return db;
 }
+export function closeDb() { if (db) { try { db.close(); } catch { /* already closed */ } db = undefined; } }
+// Rows changed on this connection since it was opened (used to detect writes).
+export const totalChanges = () => db.prepare('SELECT total_changes() n').get().n;
 
 export const now = () => new Date().toISOString();
 

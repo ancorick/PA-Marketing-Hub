@@ -1,6 +1,7 @@
 // Background jobs: send worker, nightly pipeline, newsletter collection, sunset,
-// retention. Each job has a manual re-run in the UI (14.4).
-import { one, run, now } from './db.js';
+// retention. Each job has a manual re-run in the UI (14.4). Locally they run on
+// timers; on Netlify a scheduled function calls runPeriodicJobs() + drainSends().
+import { one, run, q, now, totalChanges } from './db.js';
 import { config } from './config.js';
 import { workerTick, runSunsetPolicy } from './services/email/sending.js';
 import { runAll, enforceRetention } from './services/analytics/pipeline.js';
@@ -11,7 +12,7 @@ function lastRun(job) { return one('SELECT value FROM settings WHERE key = ?', `
 function markRun(job) { run(`INSERT INTO settings (key, value, updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, `job:${job}`, JSON.stringify(now()), now()); }
 const due = (job, hours) => { const l = lastRun(job); return !l || Date.now() - new Date(l) > hours * 36e5; };
 
-async function hourly() {
+export async function runPeriodicJobs() {
   try {
     // Nightly pipeline: finished by 07:00 Yerevan time (03:00 UTC) — NFR-F6.
     const h = new Date().getUTCHours();
@@ -30,9 +31,24 @@ async function hourly() {
   } catch (e) { console.error('scheduled job failed', e); raiseAlert('warning', 'job_failed', `Scheduled job failed: ${e.message}`); }
 }
 
+const sendWork = () => q(`SELECT id FROM sends WHERE status = 'sending' OR (status = 'scheduled' AND scheduled_at <= ?) LIMIT 1`, now()).length > 0;
+
+/** Run the send worker until nothing is left or the time budget is spent. */
+export async function drainSends(budgetMs = 5000) {
+  const until = Date.now() + budgetMs;
+  let ticks = 0;
+  while (Date.now() < until && sendWork() && !getSetting('kill_switch')) {
+    const before = totalChanges();
+    await workerTick();
+    ticks++;
+    if (totalChanges() === before) break; // e.g. warm-up cap reached for today
+  }
+  return ticks;
+}
+
 export function startJobs() {
   const t1 = setInterval(() => workerTick(), config.workerTickMs);
-  const t2 = setInterval(hourly, 15 * 60_000);
-  setTimeout(hourly, 10_000);
+  const t2 = setInterval(runPeriodicJobs, 15 * 60_000);
+  setTimeout(runPeriodicJobs, 10_000);
   return () => { clearInterval(t1); clearInterval(t2); };
 }

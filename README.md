@@ -43,6 +43,25 @@ Demo API keys (Command Center, Event Hub) and webhook secrets are written to `se
 6. **Email settings**: kill switch, DNS records, DMARC policy steps, guardrails, sunset policy.
 7. Sign in as **director@** to see the aggregate-only view.
 
+## Deploy to Netlify (no server to run)
+
+The repository deploys to Netlify as is. There is no server to keep running and nothing to configure: open the site, change things, come back days later from another computer, and everything is there for every user.
+
+1. app.netlify.com → **Add new site → Import an existing project → GitHub** → this repository.
+2. Leave the build settings as they are (they come from `netlify.toml`) → **Deploy**.
+3. Open the site and sign in with a demo account. The first visit publishes the demo data.
+
+Every `git push` to `main` redeploys automatically. Redeploys never reset live data.
+
+How it works:
+
+- The React app is static. The API and the public pages (unsubscribe, preferences, sign-up, tracking, archive) run in one Netlify Function (`netlify/functions/api.mjs`); a scheduled function (`worker.mjs`, every 5 minutes) delivers scheduled sends and runs the newsletter, pipeline and sunset jobs.
+- Data lives in **Netlify Blobs**, Netlify's managed key-value (NoSQL) store. The whole database is one compressed snapshot; each save writes a new immutable version (`db/v/<n>`) with `onlyIfNew`, so exactly one writer wins each version. Every request first checks for a newer version, so changes from other users and computers are visible immediately. When two people save at the same moment, the second request is replayed on the first one's data, so no change is lost. The last 20 versions are kept.
+- Secrets (token signing, credential encryption, webhook secrets) are generated on first run and stored in Blobs. You can override them with environment variables in the Netlify UI.
+- The Netlify build uses a lighter demo profile (half the volume, 6 months of newsletter history) to keep each save small (about 1.5 MB compressed).
+
+Limits of this mode: it suits a team of up to a few dozen staff users; every save uploads the full snapshot, so heavy simultaneous editing by many people slows saves down. "Send now" delivers within the same request (a few hundred emails); larger sends continue in the scheduled function. Scheduled functions run only on the published production deploy.
+
 ## Architecture
 
 ```

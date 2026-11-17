@@ -8,7 +8,10 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(here, '..');
-export const DATA_DIR = process.env.MH_DATA_DIR || path.join(ROOT, 'data');
+// Serverless (Netlify Functions): the database lives in Netlify Blobs and is
+// materialized in /tmp per function instance; see src/serverless/runtime.js.
+export const SERVERLESS = process.env.MH_SERVERLESS === '1';
+export const DATA_DIR = process.env.MH_DATA_DIR || (SERVERLESS ? '/tmp/marketing-hub' : path.join(ROOT, 'data'));
 export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -28,7 +31,9 @@ const dev = loadDevSecrets();
 
 export const config = {
   port: Number(process.env.PORT || 4000),
-  baseUrl: process.env.MH_BASE_URL || `http://localhost:${process.env.PORT || 4000}`,
+  // A getter: on Netlify the public URL is learned from the first request.
+  get baseUrl() { return process.env.MH_BASE_URL || process.env.URL || process.env.MH_RUNTIME_ORIGIN || `http://localhost:${process.env.PORT || 4000}`; },
+  serverless: SERVERLESS,
   dbFile: process.env.MH_DB_FILE || path.join(DATA_DIR, 'marketing-hub.db'),
   env: process.env.NODE_ENV || 'development',
   // HMAC key for unsubscribe / preferences / tracking tokens (NFR-S5).

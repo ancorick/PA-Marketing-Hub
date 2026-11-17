@@ -1,0 +1,18 @@
+# Netlify: static React app + two functions. No server to run, nothing to set up.
+# Data lives in Netlify Blobs (see server/src/serverless/runtime.js).
+[build]
+  command = "npm run build:netlify"
+  publish = "client/dist"
+
+[build.environment]
+  # Functions run on the build's Node version; 24 includes node:sqlite.
+  NODE_VERSION = "24"
+
+[functions]
+  node_bundler = "esbuild"
+
+# React app routes (API and public pages are served by the api function, which takes precedence).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -1,8 +1,7 @@
 // Staff API. Every route checks the role's permission on the server (NFR-S1).
-import fs from 'node:fs';
-import path from 'node:path';
 import express from 'express';
-import { UPLOAD_DIR, config } from '../config.js';
+import { config } from '../config.js';
+import { saveUpload } from '../lib/uploads.js';
 import { q, one, run, now, json, parse } from '../db.js';
 import { bad, notFound, toCsv, randomId, isEmail } from '../lib/util.js';
 import { ah, rateLimit } from '../lib/http.js';
@@ -300,16 +299,16 @@ router.put('/newsletter/settings', requirePerm('send.approve'), (req, res) => {
 });
 
 // Image uploads for newsletter and campaign blocks.
-router.post('/uploads', requirePerm('newsletter.edit'), (req, res) => {
+router.post('/uploads', requirePerm('newsletter.edit'), ah(async (req, res) => {
   const m = String(req.body?.data || '').match(/^data:(image\/(png|jpeg|gif|webp));base64,(.+)$/);
   if (!m) throw bad('Upload a PNG, JPEG, GIF or WebP image');
   const buf = Buffer.from(m[3], 'base64');
   if (buf.length > 2 * 1024 * 1024) throw bad('Images must be under 2 MB');
   const name = `${randomId(8)}.${m[2] === 'jpeg' ? 'jpg' : m[2]}`;
-  fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
+  await saveUpload(name, buf);
   audit(req.user, 'upload.image', { meta: { name, bytes: buf.length } });
   res.json({ url: `/uploads/${name}`, bytes: buf.length });
-});
+}));
 
 // ---------- Events (Event Hub module, 10) ----------
 router.get('/events', requirePerm('dashboard.view'), (req, res) => res.json(EH.listEvents()));

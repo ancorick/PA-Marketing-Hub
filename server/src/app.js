@@ -2,7 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
-import { ROOT, UPLOAD_DIR } from './config.js';
+import { ROOT, SERVERLESS } from './config.js';
+import { readUpload } from './lib/uploads.js';
 import { securityHeaders, errorHandler } from './lib/http.js';
 import { authenticate } from './lib/auth.js';
 import { router as integrations } from './routes/integrations.js';
@@ -12,7 +13,8 @@ import { router as api } from './routes/api.js';
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 'loopback');
+  // Behind Netlify's CDN the client IP arrives in X-Forwarded-For (rate limits need it).
+  app.set('trust proxy', SERVERLESS ? true : 'loopback');
   app.use(securityHeaders);
   app.get('/healthz', (req, res) => res.json({ ok: true }));
   // Signed webhooks need the raw body; mount before any JSON parser.
@@ -21,7 +23,13 @@ export function createApp() {
   app.use(authenticate);
   app.use('/api', api);
   app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
-  app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d', fallthrough: false }));
+  app.get('/uploads/:name', async (req, res, next) => {
+    try {
+      const f = await readUpload(req.params.name);
+      if (!f) return res.status(404).send('Not found');
+      res.set({ 'Content-Type': f.type, 'Cache-Control': 'public, max-age=604800' }).send(f.body);
+    } catch (e) { next(e); }
+  });
   // Built frontend (client/dist) with SPA fallback.
   const dist = path.resolve(ROOT, '..', 'client', 'dist');
   if (fs.existsSync(dist)) {

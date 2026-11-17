@@ -5,7 +5,8 @@
 // reserved example.* domains.
 import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { config } from '../config.js';
+import path from 'node:path';
+import { config, DATA_DIR } from '../config.js';
 import { openDb, q, one, run, now, json, tx } from '../db.js';
 import { prng, emailCmp, phoneNorm } from '../lib/util.js';
 import { hashPassword, createApiKey } from '../lib/auth.js';
@@ -20,6 +21,9 @@ import { createIssues, newsletterSegment } from '../services/newsletter.js';
 import { createSend } from '../services/email/sending.js';
 
 const DAY = 864e5;
+// Volume knobs: the Netlify build uses a lighter profile so the database snapshot stays small.
+const SCALE = Number(process.env.MH_SEED_SCALE || 1);
+const NL_MONTHS = Number(process.env.MH_SEED_NEWSLETTER_MONTHS || 99);
 const iso = (ms) => new Date(ms).toISOString();
 const ymd = (ms) => iso(ms).slice(0, 10);
 export const DEMO_PASSWORD = 'demo-password-2026';
@@ -161,7 +165,7 @@ export async function seed() {
   for (let day = 0; START + day * DAY < NOW - 2 * DAY; day++) {
     const t0 = START + day * DAY;
     const growth = 1 + day / 560 * 0.35;
-    const n = Math.floor(between(1.6, 3.4) * growth);
+    const n = Math.floor(between(1.6, 3.4) * growth * SCALE + r() * (1 - SCALE));
     for (let k = 0; k < n; k++) {
       const p = mkPerson(t0);
       const first = pickW(CHANNELS);
@@ -240,7 +244,7 @@ export async function seed() {
     if (reg.attended) msg('checkin.recorded', { registration_id: rid, checked_in_at: iso(reg.ev.t + between(0, 2) * 3600e3) }, iso(reg.ev.t));
   }
   for (const ev of publicEvents) {
-    const guests = Math.floor(between(8, 22));
+    const guests = Math.floor(between(8, 22) * SCALE);
     for (let i = 0; i < guests; i++) {
       const g = mkPerson(ev.t);
       const rid = `R-${ev.eid}-G${i}`;
@@ -253,7 +257,7 @@ export async function seed() {
   // ---------- Pure newsletter subscribers (website form, double opt-in) ----------
   tx(() => {
     for (let day = 0; START + day * DAY < NOW - DAY; day++) {
-      const n = Math.floor(between(1, 4.5));
+      const n = Math.floor(between(1, 4.5) * SCALE);
       for (let k = 0; k < n; k++) {
         const t = START + day * DAY + between(0, DAY);
         const p = mkPerson(t);
@@ -388,6 +392,7 @@ export async function seed() {
       // Calendar months (not 30-day steps), so each month gets exactly one issue per language.
       const d = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + m, 5, 9, 0, 0));
       if (d.getTime() > NOW - 3 * DAY) break;
+      if (d.getTime() < NOW - NL_MONTHS * 31 * DAY) continue;
       for (const lang of ['hy', 'en', 'ru']) histSend('newsletter', `Academy newsletter · ${ymd(d.getTime()).slice(0, 7)} · ${lang.toUpperCase()}`, d.getTime(), 'newsletter', lang, lang === 'hy' ? 'Այս ամիս Ակադեմիայում' : lang === 'ru' ? 'В этом месяце в Академии' : 'This month at the Academy', `newsletter_${ymd(d.getTime()).slice(0, 7).replace('-', '_')}_${lang}`, 6);
     }
     histSend('campaign', 'Autumn enrollment · Python Backend', NOW - 34 * DAY, 'courses', null, 'New Python Backend group starts soon', 'email_python_autumn', 3, 0.09);
@@ -458,7 +463,7 @@ export async function seed() {
   const ccKey = createApiKey('Command Center', 'command_center');
   const ehKey = createApiKey('Event Hub', 'event_hub');
   raiseAlert('info', 'welcome', 'Demo data loaded. Sign in as manager@academy.test to approve sends, or editor@academy.test to edit the newsletter.');
-  fs.writeFileSync(new URL('../../data/demo-keys.txt', import.meta.url), `Demo API keys (development only)\nCommand Center: ${ccKey}\nEvent Hub: ${ehKey}\nEvent Hub webhook secret: ${config.eventHubSecret}\nESP webhook secret: ${config.espWebhookSecret}\n`, { mode: 0o600 });
+  fs.writeFileSync(path.join(DATA_DIR, 'demo-keys.txt'), `Demo API keys (development only)\nCommand Center: ${ccKey}\nEvent Hub: ${ehKey}\nEvent Hub webhook secret: ${config.eventHubSecret}\nESP webhook secret: ${config.espWebhookSecret}\n`, { mode: 0o600 });
   log(`done. Users: admin@ / manager@ / editor@ / viewer@ / director@academy.test, password "${DEMO_PASSWORD}". API keys in server/data/demo-keys.txt`);
 }
 

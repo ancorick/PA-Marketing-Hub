@@ -1,15 +1,14 @@
 // Campaign sending (7.3, 7.4, 13.2): drafts, pre-send checks, approval, schedule,
 // idempotent batched delivery with warm-up caps, guardrails and a kill switch.
-import fs from 'node:fs';
-import path from 'node:path';
 import { q, one, run, now, json, parse, tx } from '../../db.js';
+import { uploadSize } from '../../lib/uploads.js';
 import { bad, notFound, HttpError, randomId } from '../../lib/util.js';
 import { audit, getSetting, setSetting, raiseAlert } from '../../lib/core.js';
-import { UPLOAD_DIR, config } from '../../config.js';
+import { config } from '../../config.js';
 import { isSuppressed, consentState, getContact } from '../audience.js';
 import { segmentContactIds, getSegment } from '../segments.js';
 import { renderEmail, extractLinks } from './render.js';
-import { espSend } from './esp.js';
+import { espSend, flushSimulatedEvents } from './esp.js';
 import { getDomain, defaultDomain, isDomainAuthenticated, warmupStatus } from './domains.js';
 
 const EDITABLE = ['name', 'campaign_id', 'segment_id', 'template_id', 'domain_id', 'subject', 'preheader', 'body', 'language', 'topic', 'exclude_active_applicants'];
@@ -67,10 +66,7 @@ export function updateSend(id, patch, actor) {
 // ---------- Pre-send checks (NWS-09, EML-11) ----------
 async function headSize(url) {
   try {
-    if (url.startsWith('/uploads/')) {
-      const p = path.join(UPLOAD_DIR, path.basename(url));
-      return fs.existsSync(p) ? fs.statSync(p).size : null;
-    }
+    if (url.startsWith('/uploads/')) return await uploadSize(url.slice('/uploads/'.length));
     const ctl = AbortSignal.timeout(4000);
     const r = await fetch(url, { method: 'HEAD', signal: ctl });
     return Number(r.headers.get('content-length')) || null;
@@ -284,6 +280,7 @@ export async function deliverBatch(send) {
     }
   }
   run('UPDATE sends SET sent_count = (SELECT COUNT(*) FROM deliveries WHERE send_id = ? AND esp_message_id IS NOT NULL) WHERE id = ?', send.id, send.id);
+  flushSimulatedEvents();
   return sent;
 }
 

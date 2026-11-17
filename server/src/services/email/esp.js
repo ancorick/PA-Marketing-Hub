@@ -50,19 +50,24 @@ export function simulatedOutcome(messageId, email) {
   return { multi: events };
 }
 
+// Simulated events are queued and applied right after the batch that sent the
+// messages (flushSimulatedEvents). Timers would not survive a serverless call.
+const pendingSimulated = [];
 function simulateProviderEvents(messageId, email) {
   if (config.env === 'test') return;
   const outcome = simulatedOutcome(messageId, email);
-  const list = outcome.multi || [outcome];
-  list.forEach((evt, i) => {
-    setTimeout(() => {
-      try {
-        const body = JSON.stringify({ id: `${messageId}:${evt.type}`, type: evt.type, message_id: messageId, email, bounce_type: evt.bounce_type, timestamp: new Date().toISOString() });
-        const ts = Math.floor(Date.now() / 1000);
-        handleEspWebhook(body, { 'x-esp-timestamp': String(ts), 'x-esp-signature': signWebhook(config.espWebhookSecret, ts, body) });
-      } catch (e) { console.error('simulated webhook failed', e.message); }
-    }, 400 + i * 700);
-  });
+  for (const evt of outcome.multi || [outcome]) pendingSimulated.push({ messageId, email, evt });
+}
+export function flushSimulatedEvents() {
+  while (pendingSimulated.length) {
+    const { messageId, email, evt } = pendingSimulated.shift();
+    try {
+      // Goes through the same signed-webhook path a real provider would use.
+      const body = JSON.stringify({ id: `${messageId}:${evt.type}`, type: evt.type, message_id: messageId, email, bounce_type: evt.bounce_type, timestamp: new Date().toISOString() });
+      const ts = Math.floor(Date.now() / 1000);
+      handleEspWebhook(body, { 'x-esp-timestamp': String(ts), 'x-esp-signature': signWebhook(config.espWebhookSecret, ts, body) });
+    } catch (e) { console.error('simulated webhook failed', e.message); }
+  }
 }
 
 // ---------- Webhook entry point (signature verified, idempotent) ----------
